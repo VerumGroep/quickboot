@@ -110,7 +110,7 @@ g
 ```
 
 # Debugging
-First start the GDB server using JLink:
+First start the GDB server using *JLinkGDBServer*:
 ```
 $ JLinkGDBServer -port 4444 -device STM32F103RB -USB
 ```
