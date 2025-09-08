@@ -1,0 +1,12 @@
+*.code-workspace 
+.vscode
+env
+*.pyc
+*.swp
+*.swo
+__pycache__
+src/out/*
+payload
+payload/build/*
+ref
+exploit

@@ -1,0 +1,60 @@
+#ifndef HEADER_RCC
+#define HEADER_RCC
+
+#include <stdint.h>
+
+// RCC_APB1ENR
+enum { 
+  TIM2EN,
+  TIM3EN,
+  TIM4EN,
+  TIM5EN,
+  TIM6EN,
+  TIM7EN,
+  TIM12EN,
+  TIM13EN,
+  TIM14EN,
+  WWDGEN=11,
+  SPI2EN,
+  SPI3EN,
+  USART2EN=17,
+  USART3EN,
+  USART4EN,
+  USART5EN,
+  I2C1EN,
+  I2C2EN,
+  USBEN,
+  CANEN=25,
+  BPKPEN=27,
+  PWREN,
+  DACEN
+};
+
+// RCC_APB2ENR
+enum {
+  AFIOEN,
+  IOPAEN=2,
+  IOPBEN,
+  IOPCEN,
+  IOPDEN,
+  IOPEEN,
+  IOPFEN,
+  IOPGEN,
+  ADC1EN,
+  ADC2EN,
+  TIM1EN,
+  SPI1EN,
+  TIM8EN,
+  USART1EN,
+  ADC3EN,
+  TIM9EN=19,
+  TIM10EN,
+  TIM11EN
+};
+
+struct rcc {
+  volatile uint32_t CR, CFGR, CIR, APB2STR, APB1STR, AHBENR, APB2ENR, APB1ENR, BCDR, CSR;
+};
+
+#define RCC ((struct rcc *) 0x40021000)
+#endif
