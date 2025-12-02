@@ -34,7 +34,7 @@ options:
 The client connects to */dev/ttyACM0* by default.
 
 # Goal
-Turn on the green LED (LD2) to prove that you have code execution. This can be done by writing the value **0x20** to address **0x4001810**. Or by calling some function that does this for you. The exploit should solely use the interface provided over the serial connection.
+Turn on the green LED (LD2) to prove that you have code execution. This can be done by writing the value **0x20** to address **0x40010810**. Or by calling some function that does this for you. The exploit should solely use the interface provided over the serial connection.
 
 # Requirements
 
