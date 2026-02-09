@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import math
 import gdb
 
 from pprint import pprint
@@ -120,31 +121,30 @@ class MemoryMap:
         "color": "#26032E",
         "start": int(gdb.parse_and_eval("&bootloader_unlocked")),
         "end": int(gdb.parse_and_eval("&bootloader_unlocked")) + 4,
-        "blocks": 0,
+        "blocks": {},
         "properties": {}
     }, {
         "label": "handlers",
         "color": "#0E0565",
         "start": int(handlers.address),
         "end": int(handlers.address) + handlers_size,
-        "blocks": 0,
+        "blocks": {},
         "properties": {}
     }]
 
     def __init__(self):
         self.heap = Heap()
 
-    def calc_blocks(self, regions: list) -> list:
-        for index in range(len(regions) - 1):
-            current = regions[index]
-            current["blocks"] = (current["end"] - current["start"]) // self.blocksize
+    def calc_blocks(self, regions: list) -> list:  
+        prev_r = None              
+        for r in regions:
+            r["blocks"] = {
+                "total": (r["end"] - r["start"]) // self.blocksize + 1,
+                "start": (r["start"] - self.mem_start) // self.blocksize,
+                "end": (r["end"] - self.mem_start) // self.blocksize
+            }
 
-            if current["blocks"] == 0:
-                current["blocks"] = 1 
-
-        last = regions[-1]
-        bs = (last["end"] - last["start"]) // self.blocksize
-        last["blocks"] = bs
+            prev_r = r                     
 
         return regions
 
@@ -170,17 +170,20 @@ class MemoryMap:
         for region in regions_sorted:
             # Check for unallocated blocks between current region
             # and previous address
-            print(f"{address=} {region["start"]=}")
+            print(f"{address=} {region["start"]=}")            
             if address < region["start"]:
                 print("Pre-pending empty region")
                 regions.append({
                     "label": "empty",
                     "color": "#808080",
-                    "start": address,
-                    "end": region["start"],
+                    "start": address + self.blocksize,
+                    "end": region["start"] - self.blocksize,
                     "blocks": 0,
                     "properties": {}
                 })
+
+                if address == self.mem_start:
+                    regions[-1]["start"] -= self.blocksize
 
             # Append region
             regions.append(region)
