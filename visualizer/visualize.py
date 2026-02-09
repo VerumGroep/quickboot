@@ -3,6 +3,7 @@
 import json
 import gdb
 
+from pprint import pprint
 
 """
 This script enables visualization of newlib nano heap allocator.
@@ -103,25 +104,51 @@ class MemoryMap:
     """
     This section defines the regions which need to visualized
     """
+    handlers = gdb.parse_and_eval("handlers").dereference()
+    handler = gdb.lookup_type("struct msg_handler")
+    handlers_size = int(handlers["num_handlers"]) * handler.sizeof
+
     pre_defined_regions = [{
-        "label": "heap",        
-        "color": "#FF0000",
-        "start": 0,
-        "end": 0,
+    #     "label": "heap",        
+    #     "color": "#FF0000",
+    #     "start": 0,
+    #     "end": 0,
+    #     "blocks": 0,
+    #     "properties": {}        
+    # },{
+        "label": "bootloader_unlocked",
+        "color": "#26032E",
+        "start": int(gdb.parse_and_eval("&bootloader_unlocked")),
+        "end": int(gdb.parse_and_eval("&bootloader_unlocked")) + 4,
         "blocks": 0,
-        "properties": {}        
+        "properties": {}
+    }, {
+        "label": "handlers",
+        "color": "#0E0565",
+        "start": int(handlers.address),
+        "end": int(handlers.address) + handlers_size,
+        "blocks": 0,
+        "properties": {}
     }]
 
     def __init__(self):
         self.heap = Heap()
-        
-    def calc_blocks(self, start: int, end: int) -> int:
-        bs = ((end - start) // self.blocksize)
-        if ((end -start) % self.blocksize):
-            bs += 1
 
-        return bs
+    def calc_blocks(self, regions: list) -> list:
+        for index in range(len(regions) - 1):
+            current = regions[index]
+            current["blocks"] = (current["end"] - current["start"]) // self.blocksize
 
+            if current["blocks"] == 0:
+                current["blocks"] = 1 
+
+        last = regions[-1]
+        bs = (last["end"] - last["start"]) // self.blocksize
+        last["blocks"] = bs
+
+        return regions
+
+                
     @property
     def regions(self):         
         regions = []
@@ -134,7 +161,6 @@ class MemoryMap:
                 # Set global start and end
                 self.pre_defined_regions[index]["start"] = self.heap.start
                 self.pre_defined_regions[index]["end"] = self.heap.end
-                self.pre_defined_regions[index]["blocks"] = self.calc_blocks(self.heap.start, self.heap.end)
 
         # Sort on start address
         regions_sorted = sorted(self.pre_defined_regions, key=lambda r: r["start"])
@@ -144,13 +170,15 @@ class MemoryMap:
         for region in regions_sorted:
             # Check for unallocated blocks between current region
             # and previous address
+            print(f"{address=} {region["start"]=}")
             if address < region["start"]:
+                print("Pre-pending empty region")
                 regions.append({
                     "label": "empty",
                     "color": "#808080",
                     "start": address,
                     "end": region["start"],
-                    "blocks": self.calc_blocks(address, region["start"]),
+                    "blocks": 0,
                     "properties": {}
                 })
 
@@ -166,10 +194,11 @@ class MemoryMap:
                 "color": "#808080",
                 "start": address,
                 "end": self.mem_end,
-                "blocks": self.calc_blocks(address, self.mem_end),
+                "blocks": 0,
                 "properties": {}
             })
-        
+
+        regions = self.calc_blocks(regions)
         return regions
     
 # // --------------------------------------------------------
