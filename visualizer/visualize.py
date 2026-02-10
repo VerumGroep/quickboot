@@ -116,6 +116,16 @@ class Region:
     end:int = 0
     blocks:dict = field(default_factory=dict)
     properties:dict = field(default_factory=dict)
+    
+    def initialize(self, callback):
+        return callback(self)
+                
+def get_bootloader_state(region):
+    region.properties = {
+        "value": int(gdb.parse_and_eval("bootloader_unlocked"))
+    }
+
+    return region
 
 
 class MemoryMap:
@@ -137,7 +147,7 @@ class MemoryMap:
                 "#26032E",
                 int(gdb.parse_and_eval("&bootloader_unlocked")),
                 int(gdb.parse_and_eval("&bootloader_unlocked")) + 4
-        ),
+        ).initialize(get_bootloader_state),
         Region("handlers",
                 "#0E0565",
                 int(_handlers.address),
