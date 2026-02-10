@@ -57,6 +57,14 @@ class FreeListNotFoundError(Exception):
     pass
 
 
+@dataclass
+class Chunk:
+    start:int = 0
+    end:int = 0
+    size:int = 0
+    next:int = 0
+
+    
 class Heap:
     def __init__(self):
         self.t_chunk = gdb.lookup_type("struct malloc_chunk")
@@ -68,34 +76,117 @@ class Heap:
         
         self.free_list = free_list.dereference()
 
-    def _list_free(self):
-        self._update()
+    @property
+    def _free_chunks(self):
+        # Try to update the list of free chunks. This can
+        # fail if we have corrupted the pointer or if we
+        # did not free any chunks yet.
+        try:
+            self._update()
+        except FreeListNotFoundError:
+            return []
+
+
         p = self.free_list
         r = p
 
         chunks = []
         while(r):
-            c = {"address": r.address,
-                 "size": int(r["size"]),
-                 "next": int(r["next"])}
-            
-            chunks.append(c)            
-            if(c["next"] != 0):
-                r = gdb.Value(c["next"]).cast(self.t_chunk.pointer()).dereference()
+            c = Chunk(
+                start = int(r.address),
+                end = int(r.address) + int(r["size"]),
+                size = int(r["size"]),
+                next = int(r["next"]))
+
+            chunks.append(c)
+                        
+            if(c.next != 0):
+                r = gdb.Value(c.next).cast(self.t_chunk.pointer()).dereference()
             else:
                 r = None
 
         return chunks
-    
-    def add_regions(self, regions):
+       
+    @property
+    def free(self):
         """
-        This function will add heap specific regions to the
+        This function will return heap specific regions to the
         memory map. These include:
 
             - Chunks on the free list
             - Allocated chunks
             - End of the heap
         """
+        regions = []
+        for chunk in self._free_chunks:
+            regions.append(Region(
+                label="free_chunk",
+                color="#157C1D",
+                start=chunk.start,
+                end=chunk.end,
+                properties = {
+                    "size": chunk.size,
+                    "next": chunk.next
+                }
+            ))
+
+        return regions
+    
+    @property
+    def allocated(self):
+        """
+        Allocated chunks are located within the heap
+        but are not present on the free list.
+        """
+
+        regions = []
+        free = self.free
+        
+        # If there are no free chunks, then the entire
+        # memory region is allocated        
+        if not len(free):
+            return [Region(
+                label="allocated_chunk",
+                color="#FF0000",
+                start=self.start,
+                end=self.end
+            )]
+
+        # Add allocated chunk up until the first free item
+        prev_region = free[0]
+        if free[0].start > self.start:
+            regions.append(Region(
+                label="allocated_chunk",
+                color="#FF0000",
+                start=self.start,
+                end=free[0].end
+            ))
+
+            prev_region = regions[0]
+
+        # Iterate over all free items and add allocated
+        # regions in between
+        
+        for region in free:
+            if prev_region.end < region.start:
+                regions.append(Region(
+                label="allocated_chunk",
+                color="#FF0000",
+                start=prev_region.end,
+                end=region.start
+            ))
+                
+        # There should never be an allocated chunk
+        # after the last item in the free list. But
+        # you'll never know what might happen.
+        if prev_region.end < self.end:
+            regions.append(Region(
+                label="allocated_chunk",
+                color="#FF0000",
+                start=prev_region.end,
+                end=self.end
+            ))
+
         return regions
     
     @property
@@ -105,13 +196,17 @@ class Heap:
     @property
     def end(self):
         return int(gdb.parse_and_eval("_sbrk(0)"))
+    
+    @property
+    def size(self):
+        return self.end - self.start
 
 # // --------------------------------------------------------
 
 @dataclass
 class Region:
     label:str = "Unknown"
-    color:str = "#FF0000"
+    color:str = "#D103A4"
     start:int = 0
     end:int = 0
     blocks:dict = field(default_factory=dict)
@@ -119,8 +214,9 @@ class Region:
     
     def initialize(self, callback):
         return callback(self)
-                
-def get_bootloader_state(region):
+
+
+def get_bootloader_state(region:Region):
     region.properties = {
         "value": int(gdb.parse_and_eval("bootloader_unlocked"))
     }
@@ -144,12 +240,12 @@ class MemoryMap:
 
     _pre_defined_regions = [
         Region("bootloader_unlocked",
-                "#26032E",
+                "#0300AD",
                 int(gdb.parse_and_eval("&bootloader_unlocked")),
                 int(gdb.parse_and_eval("&bootloader_unlocked")) + 4
         ).initialize(get_bootloader_state),
         Region("handlers",
-                "#0E0565",
+                "#A84105",
                 int(_handlers.address),
                 int(_handlers.address) + _handlers_size
     )]
@@ -170,6 +266,7 @@ class MemoryMap:
         if regions[0].start > self.mem_start:
             padded_regions.append(Region(
                 label="empty",
+                color="#E2DF18",
                 start=self.mem_start,
                 end=regions[0].start
             ))
@@ -178,9 +275,10 @@ class MemoryMap:
         # between adjacent regions
         prev_region = padded_regions[0]
         for region in regions:            
-            if prev_region.end < (region.start - self.blocksize):
+            if prev_region.end < region.start:
                 padded_regions.append(Region(
                     label="empty",
+                    color="#E2DF18",
                     start=prev_region.end,
                     end=region.start
                 ))
@@ -192,6 +290,7 @@ class MemoryMap:
         if prev_region.end < self.mem_end:
             padded_regions.append(Region(
                 label="empty",
+                color="#E2DF18",
                 start=prev_region.end,
                 end=self.mem_end
             ))
@@ -248,26 +347,41 @@ class MemoryMap:
             total_bytes += region.end - region.start
             total_blocks += region.blocks["total"]
 
+        total_mem_size = self.mem_size + self.heap.size
+        print(f"{self.mem_size=} {self.heap.size=}")
+
+        total_mem_blocks = self.mem_blocks + math.ceil(self.heap.size / self.blocksize)
+        print(f"{self.mem_blocks=} {math.ceil(self.heap.size / self.blocksize)=}")
+
         try:
-            assert(total_bytes == self.mem_size)
-            assert(total_blocks == self.mem_blocks)
+            
+            assert(total_bytes == total_mem_size)
+            assert(total_blocks == total_mem_blocks)
         except AssertionError:
-            print(f"{total_bytes=} {self.mem_size=}")
-            print(f"{total_blocks=} {self.mem_blocks=}")
+            print(f"{total_bytes=} {total_mem_size=}")
+            print(f"{total_blocks=} {total_mem_blocks=}")
             return
             
     @property
     def regions(self):         
         _regions = []
 
-        # Sort, add empty regions and block meta data
-        _regions = sorted(self._pre_defined_regions, key=lambda r: r.start)
-        _regions = self.heap.add_regions(_regions)
+        # Merge and sort all relevant regions
+        _regions = sorted(self._pre_defined_regions +\
+                          self.heap.free +
+                          self.heap.allocated,\
+                           key=lambda r: r.start)
+        
+        # Apply padding for unallocated/undefined regions
         _regions = self._add_empty_regions(_regions)
+
+        # Add block metadata, used for visualization
         self._add_block_metadata(_regions)
+
+        # Adjust for overlapping regions
         self._adjust_regions(_regions)
 
-        # Perform
+        # Perform some sanity checks
         self._check(_regions)
      
         return [asdict(r) for r in _regions]
@@ -316,6 +430,12 @@ if __name__ == "__main__":
             "end": mm.mem_end,  
             "blocks": mm.mem_blocks,
             "regions": mm.regions
+        },
+
+        "heap": {
+            "start": mm.heap.start,
+            "end": mm.heap.end,
+            "size": mm.heap.size
         }
     }
 
