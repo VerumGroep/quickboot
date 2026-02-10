@@ -4,6 +4,7 @@ import json
 import math
 import gdb
 
+from dataclasses import dataclass, field, asdict
 from pprint import pprint
 
 """
@@ -20,6 +21,7 @@ def gdb_read_bytes(value:gdb.Value) -> bytes:
 
 class MailboxNotFoundError(Exception):
     pass
+
 
 class MessageBox:    
     def __init__(self, mbox):
@@ -59,15 +61,15 @@ class Heap:
     def __init__(self):
         self.t_chunk = gdb.lookup_type("struct malloc_chunk")
         
-    def update(self):
+    def _update(self):
         free_list = gdb.parse_and_eval("__malloc_free_list")
         if(free_list == 0):
             raise FreeListNotFoundError("Could not find free list")
         
         self.free_list = free_list.dereference()
 
-    def list_free(self):
-        self.update()
+    def _list_free(self):
+        self._update()
         p = self.free_list
         r = p
 
@@ -85,6 +87,17 @@ class Heap:
 
         return chunks
     
+    def add_regions(self, regions):
+        """
+        This function will add heap specific regions to the
+        memory map. These include:
+
+            - Chunks on the free list
+            - Allocated chunks
+            - End of the heap
+        """
+        return regions
+    
     @property
     def start(self):
         return int(gdb.parse_and_eval("__malloc_sbrk_start"))
@@ -94,6 +107,16 @@ class Heap:
         return int(gdb.parse_and_eval("_sbrk(0)"))
 
 # // --------------------------------------------------------
+
+@dataclass
+class Region:
+    label:str = "Unknown"
+    color:str = "#FF0000"
+    start:int = 0
+    end:int = 0
+    blocks:dict = field(default_factory=dict)
+    properties:dict = field(default_factory=dict)
+
 
 class MemoryMap:
     # SRAM properties
@@ -105,104 +128,139 @@ class MemoryMap:
     """
     This section defines the regions which need to visualized
     """
-    handlers = gdb.parse_and_eval("handlers").dereference()
-    handler = gdb.lookup_type("struct msg_handler")
-    handlers_size = int(handlers["num_handlers"]) * handler.sizeof
+    _handlers = gdb.parse_and_eval("handlers").dereference()
+    _handler = gdb.lookup_type("struct msg_handler")
+    _handlers_size = int(_handlers["num_handlers"]) * _handler.sizeof
 
-    pre_defined_regions = [{
-    #     "label": "heap",        
-    #     "color": "#FF0000",
-    #     "start": 0,
-    #     "end": 0,
-    #     "blocks": 0,
-    #     "properties": {}        
-    # },{
-        "label": "bootloader_unlocked",
-        "color": "#26032E",
-        "start": int(gdb.parse_and_eval("&bootloader_unlocked")),
-        "end": int(gdb.parse_and_eval("&bootloader_unlocked")) + 4,
-        "blocks": {},
-        "properties": {}
-    }, {
-        "label": "handlers",
-        "color": "#0E0565",
-        "start": int(handlers.address),
-        "end": int(handlers.address) + handlers_size,
-        "blocks": {},
-        "properties": {}
-    }]
+    _pre_defined_regions = [
+        Region("bootloader_unlocked",
+                "#26032E",
+                int(gdb.parse_and_eval("&bootloader_unlocked")),
+                int(gdb.parse_and_eval("&bootloader_unlocked")) + 4
+        ),
+        Region("handlers",
+                "#0E0565",
+                int(_handlers.address),
+                int(_handlers.address) + _handlers_size
+    )]
 
     def __init__(self):
         self.heap = Heap()
 
-    def calc_blocks(self, regions: list) -> list:  
-        prev_r = None              
-        for r in regions:
-            r["blocks"] = {
-                "total": (r["end"] - r["start"]) // self.blocksize + 1,
-                "start": (r["start"] - self.mem_start) // self.blocksize,
-                "end": (r["end"] - self.mem_start) // self.blocksize
+    @property
+    def mem_blocks(self):
+        return self.mem_size // self.blocksize
+                        
+    def _add_empty_regions(self, regions:list):
+        padded_regions = []
+        if not len(regions):
+            return []
+
+        # Fill memory up until the first region
+        if regions[0].start > self.mem_start:
+            padded_regions.append(Region(
+                label="empty",
+                start=self.mem_start,
+                end=regions[0].start
+            ))
+
+        # Loop through all regions and add empty memory
+        # between adjacent regions
+        prev_region = padded_regions[0]
+        for region in regions:            
+            if prev_region.end < (region.start - self.blocksize):
+                padded_regions.append(Region(
+                    label="empty",
+                    start=prev_region.end,
+                    end=region.start
+                ))
+            
+            padded_regions.append(region)
+            prev_region = region
+            
+        # Fill memory space up until the end of memory        
+        if prev_region.end < self.mem_end:
+            padded_regions.append(Region(
+                label="empty",
+                start=prev_region.end,
+                end=self.mem_end
+            ))
+
+        return padded_regions
+    
+
+    def _add_block_metadata(self, regions):
+        for region in regions:
+            start_block = (region.start - self.mem_start) // self.blocksize
+            end_block = (region.end - self.mem_start) // self.blocksize
+
+            region.blocks = {
+                "start": start_block,
+                "end": end_block,
+                "total": end_block - start_block,
             }
 
-            prev_r = r                     
+    def _adjust_regions(self, regions):
+        for i, region in enumerate(regions):
+            if region.blocks["total"] > 0:
+                continue
 
-        return regions
+            region.blocks["total"] = 1
 
-                
+            if i + 1 < len(regions):
+                next_region = regions[i + 1]
+                next_region.blocks["start"] += 1
+                next_region.blocks["total"] -= 1
+
+                region.blocks["start"] = region.blocks["end"]
+                region.blocks["end"] = region.blocks["start"] + 1
+
+            elif i > 0:
+                prev_region = regions[i - 1]
+                prev_region.blocks["end"] -= 1
+                prev_region.blocks["total"] -= 1
+
+                region.blocks["end"] = region.blocks["start"] + 1
+
+ 
+    def _check(self, regions):
+
+        """
+        Check 1: Add all bytes from each regions and compare
+        with the total memory size
+
+        Check 2: Add all blocks from each region and compare
+        with total number of expected block
+        """
+        total_bytes = 0
+        total_blocks = 0
+        for region in regions:
+            total_bytes += region.end - region.start
+            total_blocks += region.blocks["total"]
+
+        try:
+            assert(total_bytes == self.mem_size)
+            assert(total_blocks == self.mem_blocks)
+        except AssertionError:
+            print(f"{total_bytes=} {self.mem_size=}")
+            print(f"{total_blocks=} {self.mem_blocks=}")
+            return
+            
     @property
     def regions(self):         
-        regions = []
+        _regions = []
 
-        # Update heap values
-        for index in range(len(self.pre_defined_regions)):
-            region = self.pre_defined_regions[index]
+        # Sort, add empty regions and block meta data
+        _regions = sorted(self._pre_defined_regions, key=lambda r: r.start)
+        _regions = self.heap.add_regions(_regions)
+        _regions = self._add_empty_regions(_regions)
+        self._add_block_metadata(_regions)
+        self._adjust_regions(_regions)
 
-            if region["label"] == "heap":
-                # Set global start and end
-                self.pre_defined_regions[index]["start"] = self.heap.start
-                self.pre_defined_regions[index]["end"] = self.heap.end
-
-        # Sort on start address
-        regions_sorted = sorted(self.pre_defined_regions, key=lambda r: r["start"])
-
-        # Fill final map with empty blocks
-        address = self.mem_start        
-        for region in regions_sorted:
-            # Check for unallocated blocks between current region
-            # and previous address
-            print(f"{address=} {region["start"]=}")            
-            if address < region["start"]:
-                print("Pre-pending empty region")
-                regions.append({
-                    "label": "empty",
-                    "color": "#808080",
-                    "start": address + self.blocksize,
-                    "end": region["start"] - self.blocksize,
-                    "blocks": 0,
-                    "properties": {}
-                })
-
-                if address == self.mem_start:
-                    regions[-1]["start"] -= self.blocksize
-
-            # Append region
-            regions.append(region)
-
-            # Update last address
-            address = region["end"]
-
-        if address < self.mem_end:
-            regions.append({
-                "label": "empty",
-                "color": "#808080",
-                "start": address,
-                "end": self.mem_end,
-                "blocks": 0,
-                "properties": {}
-            })
-
-        regions = self.calc_blocks(regions)
-        return regions
+        # Perform
+        self._check(_regions)
+     
+        return [asdict(r) for r in _regions]
     
 # // --------------------------------------------------------
 
@@ -227,7 +285,7 @@ class Visualize:
         return self.outbox.messages
 
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
     v = Visualize()    
     mm = MemoryMap()
 
@@ -246,7 +304,7 @@ if __name__ == "__main__":
             "blocksize": mm.blocksize,
             "start": mm.mem_start,
             "end": mm.mem_end,  
-            "blocks": mm.mem_size // mm.blocksize,
+            "blocks": mm.mem_blocks,
             "regions": mm.regions
         }
     }
