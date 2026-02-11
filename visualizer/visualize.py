@@ -301,6 +301,7 @@ class Heap:
     @property
     def size(self):
         return self.end - self.start
+    
 
 # // --------------------------------------------------------
 
@@ -521,13 +522,12 @@ if __name__ == "__main__":
             "start": mm.mem_start,
             "end": mm.mem_end,  
             "blocks": mm.mem_blocks,
-            "regions": mm.regions
-        },
-
-        "heap": {
-            "start": mm.heap.start,
-            "end": mm.heap.end,
-            "size": mm.heap.size
+            "heap": {
+                "start": mm.heap.start,
+                "end": mm.heap.end,
+                "blocks": mm.heap.size // mm.blocksize
+            },
+            "regions": mm.regions            
         }
     }
 

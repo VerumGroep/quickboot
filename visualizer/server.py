@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 
 import threading
-import json
-import sys
 
 from enum import Enum
 from pathlib import Path
 from time import time_ns
 
 from pygdbmi.gdbcontroller import GdbController
-from flask import Flask
+from flask import Flask, Response
 from flask_cors import CORS
 
 CURRENT_DIRECTORY = Path('.')
@@ -80,11 +78,11 @@ def get_snapshot():
                 if m["stream"] == "stdout" and m["type"] == "console":
                     json = m["payload"]
 
-            run()
+            run()            
     except TimeoutError:
-        return {'error': 'Timeout'}      
+        return Response({'error': 'Timeout'}, mimetype="application/json")      
 
-    return json
+    return Response(json, mimetype="application/json")
 
 if __name__ == "__main__":     
     gdbmi.write("set pagination off")
