@@ -10,6 +10,11 @@ from pprint import pprint
 """
 This script enables visualization of newlib nano heap allocator.
 """
+def gdb_read_range(start:int, end:int) -> bytes:
+    return gdb.selected_inferior() \
+        .read_memory(start,
+                     end - start) \
+        .tobytes()
 
 def gdb_read_bytes(value:gdb.Value) -> bytes:
     return gdb.selected_inferior() \
@@ -51,6 +56,35 @@ class MessageBox:
 
         return messages
                         
+# // --------------------------------------------------------
+
+@dataclass
+class Region:
+    label:str = "Unknown"
+    color:str = "#D103A4"
+    start:int = 0
+    end:int = 0
+    blocks:dict = field(default_factory=dict)
+    properties:dict = field(default_factory=dict)
+    
+    def initialize(self, callback):
+        return callback(self)
+
+@dataclass
+class EmptyRegion(Region):
+    label="empty"
+    color="#E2DF18"
+
+@dataclass
+class FreeRegion(Region):
+    label="free_chunk"
+    color="#157C1D"
+    
+@dataclass
+class AllocatedRegion(Region):
+    label="allocated_chunk"
+    color="#FF0000"
+
 # // --------------------------------------------------------
 
 class FreeListNotFoundError(Exception):
@@ -119,9 +153,7 @@ class Heap:
         """
         regions = []
         for chunk in self._free_chunks:
-            regions.append(Region(
-                label="free_chunk",
-                color="#157C1D",
+            regions.append(FreeRegion(                
                 start=chunk.start,
                 end=chunk.end,
                 properties = {
@@ -145,21 +177,23 @@ class Heap:
         # If there are no free chunks, then the entire
         # memory region is allocated        
         if not len(free):
-            return [Region(
-                label="allocated_chunk",
-                color="#FF0000",
+            return [AllocatedRegion(                
                 start=self.start,
-                end=self.end
+                end=self.end,
+                properties={
+                    "data": gdb_read_range(self.start, self.end).hex()
+                } 
             )]
 
         # Add allocated chunk up until the first free item
         prev_region = free[0]
         if free[0].start > self.start:
-            regions.append(Region(
-                label="allocated_chunk",
-                color="#FF0000",
+            regions.append(AllocatedRegion(                
                 start=self.start,
-                end=free[0].end
+                end=free[0].end,
+                properties={
+                    "data": gdb_read_range(self.start, free[0].end).hex()
+                } 
             ))
 
             prev_region = regions[0]
@@ -169,20 +203,22 @@ class Heap:
         
         for region in free:
             if prev_region.end < region.start:
-                regions.append(Region(
-                label="allocated_chunk",
-                color="#FF0000",
+                regions.append(AllocatedRegion(                
                 start=prev_region.end,
-                end=region.start
+                end=region.start,
+                properties={
+                    "data": gdb_read_range(prev_region.end, region.start).hex()
+                }      
+
             ))
+                
+            prev_region = region
                 
         # There should never be an allocated chunk
         # after the last item in the free list. But
         # you'll never know what might happen.
         if prev_region.end < self.end:
-            regions.append(Region(
-                label="allocated_chunk",
-                color="#FF0000",
+            regions.append(AllocatedRegion(                
                 start=prev_region.end,
                 end=self.end
             ))
@@ -202,19 +238,6 @@ class Heap:
         return self.end - self.start
 
 # // --------------------------------------------------------
-
-@dataclass
-class Region:
-    label:str = "Unknown"
-    color:str = "#D103A4"
-    start:int = 0
-    end:int = 0
-    blocks:dict = field(default_factory=dict)
-    properties:dict = field(default_factory=dict)
-    
-    def initialize(self, callback):
-        return callback(self)
-
 
 def get_bootloader_state(region:Region):
     region.properties = {
@@ -264,9 +287,7 @@ class MemoryMap:
 
         # Fill memory up until the first region
         if regions[0].start > self.mem_start:
-            padded_regions.append(Region(
-                label="empty",
-                color="#E2DF18",
+            padded_regions.append(EmptyRegion(                
                 start=self.mem_start,
                 end=regions[0].start
             ))
@@ -276,9 +297,7 @@ class MemoryMap:
         prev_region = padded_regions[0]
         for region in regions:            
             if prev_region.end < region.start:
-                padded_regions.append(Region(
-                    label="empty",
-                    color="#E2DF18",
+                padded_regions.append(EmptyRegion(                    
                     start=prev_region.end,
                     end=region.start
                 ))
@@ -288,9 +307,7 @@ class MemoryMap:
             
         # Fill memory space up until the end of memory        
         if prev_region.end < self.mem_end:
-            padded_regions.append(Region(
-                label="empty",
-                color="#E2DF18",
+            padded_regions.append(EmptyRegion(                
                 start=prev_region.end,
                 end=self.mem_end
             ))
