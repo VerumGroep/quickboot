@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, asdict
 from pprint import pprint
 
 """
-This script enables visualization of newlib nano heap allocator.
+This script enables visualization of the newlib nano heap allocator.
 """
 def gdb_read_range(start:int, end:int) -> bytes:
     return gdb.selected_inferior() \
@@ -24,9 +24,24 @@ def gdb_read_bytes(value:gdb.Value) -> bytes:
 
 # // --------------------------------------------------------
 
-class MailboxNotFoundError(Exception):
+class MessageBoxNotFoundError(Exception):
     pass
 
+@dataclass
+class Header():
+    address:int = 0
+    magic:str = ""
+    version:int = 0
+    id:int = 0
+    type:int = 0
+    flags:int= 0
+    len:int = 0
+    crc32:int = 0
+    
+@dataclass
+class Message():
+    header: Header
+    data: int = 0
 
 class MessageBox:    
     def __init__(self, mbox):
@@ -40,28 +55,51 @@ class MessageBox:
             header = message["header"]
 
             messages.append(
-                {
-                    "header": {
-                        "address": int(message.address),
-                        "magic": gdb_read_bytes(header["magic"]).hex(),
-                        "version": int(header["version"]),
-                        "id": int(header["id"]),
-                        "type": int(header["type"]),
-                        "flags": int(header["flags"]),
-                        "len": int(header["len"]),
-                        "crc32": int(header["crc32"]),
-                    }, "data": gdb_read_bytes(message["data"]).hex()                    
-                }
+                Message(
+                    header = Header(                    
+                        address = int(message.address),
+                        magic = gdb_read_bytes(header["magic"]).hex(),
+                        version = int(header["version"]),
+                        id = int(header["id"]),
+                        type = int(header["type"]),
+                        flags = int(header["flags"]),
+                        len = int(header["len"]),
+                        crc32 = int(header["crc32"]),
+                    ),
+                    data = int(message["data"])
+                )
             )
 
         return messages
+    
+class MessageBoxes:
+    def __init__(self):            
+        inbox = gdb.parse_and_eval("inbox")
+        if(inbox == 0):
+            raise MessageBoxNotFoundError("Could not find inbox")
+        
+        self._inbox = MessageBox(inbox.dereference())
+                
+        outbox = gdb.parse_and_eval("outbox")
+        if(outbox == 0):
+            raise MessageBoxNotFoundError("Could not find outbox")
+        
+        self._outbox = MessageBox(outbox.dereference())
+        
+    @property
+    def inbox(self):        
+        return self._inbox.messages
+
+    @property        
+    def outbox(self):
+        return self._outbox.messages
                         
 # // --------------------------------------------------------
 
 @dataclass
 class Region:
     label:str = "Unknown"
-    color:str = "#D103A4"
+    color:str = "#0679E4"
     start:int = 0
     end:int = 0
     blocks:dict = field(default_factory=dict)
@@ -72,18 +110,28 @@ class Region:
 
 @dataclass
 class EmptyRegion(Region):
-    label="empty"
-    color="#E2DF18"
+    label:str = "empty"
+    color:str ="#9C9C96"
 
 @dataclass
 class FreeRegion(Region):
-    label="free_chunk"
-    color="#157C1D"
-    
+    label:str = "free_chunk"
+    color:str ="#14D123"
+
+@dataclass
+class MessageRegion(Region):
+    label:str = "message"
+    color:str ="#DB1DA2"
+
 @dataclass
 class AllocatedRegion(Region):
-    label="allocated_chunk"
-    color="#FF0000"
+    label:str ="allocated_chunk"
+    color:str ="#FF0000"
+
+@dataclass
+class HeapRegion(Region):
+    label:str ="heap"
+    color:str ="#FF9900"
 
 # // --------------------------------------------------------
 
@@ -100,8 +148,10 @@ class Chunk:
 
     
 class Heap:
-    def __init__(self):
+    def __init__(self, msgbox:MessageBoxes):
         self.t_chunk = gdb.lookup_type("struct malloc_chunk")
+        self.t_msg = gdb.lookup_type("struct msg")
+        self.msgbox = msgbox
         
     def _update(self):
         free_list = gdb.parse_and_eval("__malloc_free_list")
@@ -144,18 +194,13 @@ class Heap:
     @property
     def free(self):
         """
-        This function will return heap specific regions to the
-        memory map. These include:
-
-            - Chunks on the free list
-            - Allocated chunks
-            - End of the heap
+        Returns a list of free'ed memory regions
         """
         regions = []
         for chunk in self._free_chunks:
             regions.append(FreeRegion(                
-                start=chunk.start,
-                end=chunk.end,
+                start = chunk.start,
+                end = chunk.end,
                 properties = {
                     "size": chunk.size,
                     "next": chunk.next
@@ -167,60 +212,79 @@ class Heap:
     @property
     def allocated(self):
         """
-        Allocated chunks are located within the heap
-        but are not present on the free list.
+        Returns a list of allocated memory objects
+
+            - Messages
+            - Message data
+        """
+
+        # Map message messages and data
+        regions = []
+        for message in self.msgbox.inbox + self.msgbox.outbox:            
+            regions.append(MessageRegion(
+                start = message.header.address,
+                end = message.header.address + self.t_msg.sizeof
+            ))
+
+            if message.data > 0:
+                regions.append(AllocatedRegion(
+                    start = message.data,
+                    end = message.data + message.header.len,
+                    properties = {
+                        "data": gdb_read_range(message.data, message.data + message.header.len).hex()
+                    }
+                ))
+
+        return regions
+    
+    @property    
+    def regions(self):
+        """
+        Here we map all areas belonging to the heap
+        that have not yet been mapped as free or
+        allocated.
         """
 
         regions = []
-        free = self.free
+        mapped_regions = sorted(self.free + self.allocated, key=lambda r: r.start)
         
-        # If there are no free chunks, then the entire
-        # memory region is allocated        
-        if not len(free):
-            return [AllocatedRegion(                
+        # If there are no mapped regions, then the entire
+        # heap is mapped        
+        if not len(mapped_regions):
+            return [HeapRegion(                
                 start=self.start,
-                end=self.end,
-                properties={
-                    "data": gdb_read_range(self.start, self.end).hex()
-                } 
+                end=self.end
             )]
 
-        # Add allocated chunk up until the first free item
-        prev_region = free[0]
-        if free[0].start > self.start:
-            regions.append(AllocatedRegion(                
-                start=self.start,
-                end=free[0].end,
-                properties={
-                    "data": gdb_read_range(self.start, free[0].end).hex()
-                } 
+        # Add allocated chunk up until the first mapped region
+        prev_region = mapped_regions[0]
+        if mapped_regions[0].start > self.start:
+            regions.append(HeapRegion(                
+                start = self.start,
+                end = mapped_regions[0].start
             ))
-
+                        
             prev_region = regions[0]
 
-        # Iterate over all free items and add allocated
-        # regions in between
-        
-        for region in free:
+        # Iterate over all mapped regions and add heap
+        # regions in between        
+        for region in mapped_regions:
             if prev_region.end < region.start:
-                regions.append(AllocatedRegion(                
-                start=prev_region.end,
-                end=region.start,
-                properties={
-                    "data": gdb_read_range(prev_region.end, region.start).hex()
-                }      
-
+                regions.append(HeapRegion(                
+                start = prev_region.end,
+                end = region.start
             ))
                 
+            regions.append(region)
             prev_region = region
                 
         # There should never be an allocated chunk
         # after the last item in the free list. But
         # you'll never know what might happen.
         if prev_region.end < self.end:
-            regions.append(AllocatedRegion(                
-                start=prev_region.end,
-                end=self.end
+            regions.append(HeapRegion(                
+                start = prev_region.end,
+                end = self.end
             ))
 
         return regions
@@ -273,8 +337,8 @@ class MemoryMap:
                 int(_handlers.address) + _handlers_size
     )]
 
-    def __init__(self):
-        self.heap = Heap()
+    def __init__(self, msgbox:MessageBoxes):
+        self.heap = Heap(msgbox)
 
     @property
     def mem_blocks(self):
@@ -288,8 +352,8 @@ class MemoryMap:
         # Fill memory up until the first region
         if regions[0].start > self.mem_start:
             padded_regions.append(EmptyRegion(                
-                start=self.mem_start,
-                end=regions[0].start
+                start = self.mem_start,
+                end = regions[0].start
             ))
 
         # Loop through all regions and add empty memory
@@ -297,10 +361,20 @@ class MemoryMap:
         prev_region = padded_regions[0]
         for region in regions:            
             if prev_region.end < region.start:
-                padded_regions.append(EmptyRegion(                    
-                    start=prev_region.end,
-                    end=region.start
-                ))
+
+                # Map as a heap region if teh start
+                # address is within boundaries
+                if prev_region.end > self.heap.start and \
+                    prev_region.end < self.heap.end:
+                    padded_regions.append(HeapRegion(
+                        start = prev_region.end,
+                        end = region.start
+                    ))
+                else:
+                    padded_regions.append(EmptyRegion(                    
+                        start = prev_region.end,
+                        end = region.start
+                    ))
             
             padded_regions.append(region)
             prev_region = region
@@ -385,8 +459,7 @@ class MemoryMap:
 
         # Merge and sort all relevant regions
         _regions = sorted(self._pre_defined_regions +\
-                          self.heap.free +
-                          self.heap.allocated,\
+                          self.heap.regions,\
                            key=lambda r: r.start)
         
         # Apply padding for unallocated/undefined regions
@@ -405,39 +478,18 @@ class MemoryMap:
     
 # // --------------------------------------------------------
 
-class Visualize:
-    def __init__(self):            
-        inbox = gdb.parse_and_eval("inbox")
-        if(inbox == 0):
-            raise MailboxNotFoundError("Could not find inbox")
-        
-        self.inbox = MessageBox(inbox.dereference())
-                
-        outbox = gdb.parse_and_eval("outbox")
-        if(outbox == 0):
-            raise MailboxNotFoundError("Could not find outbox")
-        
-        self.outbox = MessageBox(outbox.dereference())
-        
-    def list_inbox(self):        
-        return self.inbox.messages
-        
-    def list_outbox(self):
-        return self.outbox.messages
-
-
 if __name__ == "__main__":
-    v = Visualize()    
-    mm = MemoryMap()
+    mb = MessageBoxes()    
+    mm = MemoryMap(mb)
 
     resp = {
         "mailbox": {
             "inbox": {
-                "messages": v.list_inbox()
+                "messages": [asdict(m) for m in mb.inbox]
             },
 
             "outbox": {
-                "messages": v.list_outbox()
+                "messages": [asdict(m) for m in mb.outbox]
             }
         },
 
