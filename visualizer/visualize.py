@@ -42,6 +42,7 @@ class Header():
 class Message():
     header: Header
     data: int = 0
+    payload: str  = ""
 
 class MessageBox:    
     def __init__(self, mbox):
@@ -66,7 +67,8 @@ class MessageBox:
                         len = int(header["len"]),
                         crc32 = int(header["crc32"]),
                     ),
-                    data = int(message["data"])
+                    data = int(message["data"]),
+                    payload = gdb_read_range(int(message["data"]), int(message["data"]) + int(header["len"])).hex()
                 )
             )
 
@@ -234,7 +236,7 @@ class Heap:
                     properties = {
                         "message.header.address": message.header.address,
                         "message.header.id": message.header.id,                        
-                        "data": gdb_read_range(message.data, message.data + message.header.len).hex()
+                        "data": message.payload
                     }
                 ))
 
