@@ -228,9 +228,12 @@ class Heap:
 
             if message.data > 0:
                 regions.append(AllocatedRegion(
+                    label = f"Data message #{message.header.id}",
                     start = message.data,
                     end = message.data + message.header.len,
                     properties = {
+                        "message.header.address": message.header.address,
+                        "message.header.id": message.header.id,                        
                         "data": gdb_read_range(message.data, message.data + message.header.len).hex()
                     }
                 ))
@@ -252,8 +255,8 @@ class Heap:
         # heap is mapped        
         if not len(mapped_regions):
             return [HeapRegion(                
-                start=self.start,
-                end=self.end
+                start = self.start,
+                end = self.end
             )]
 
         # Add allocated chunk up until the first mapped region
@@ -278,9 +281,7 @@ class Heap:
             regions.append(region)
             prev_region = region
                 
-        # There should never be an allocated chunk
-        # after the last item in the free list. But
-        # you'll never know what might happen.
+        # Map remaining heap space
         if prev_region.end < self.end:
             regions.append(HeapRegion(                
                 start = prev_region.end,
@@ -400,13 +401,38 @@ class MemoryMap:
                 "total": end_block - start_block,
             }
 
-    def _adjust_regions(self, regions):
+
+    def _adjust_shared_block(self, regions):
+        for i, region in enumerate(regions):
+            if i + 1 < len(regions):
+                next_region = regions[i + 1]
+                if region.blocks["start"] == next_region.blocks["start"]:
+                    if type(next_region) in [EmptyRegion, HeapRegion]:                       
+                        next_region.blocks["total"] = 0
+
+                    if type(region) in [EmptyRegion, HeapRegion]:
+                        region.blocks["total"] = 0
+
+    def _adjust_overlapping(self, regions):
+        for i, region in enumerate(regions):
+            if i + 1 < len(regions):
+                next_region = regions[i + 1]
+                if region.end > next_region.start:                    
+                    region.end = next_region.start
+                    self._add_block_metadata([region, next_region])
+
+
+    def _adjust_empty(self, regions):
         for i, region in enumerate(regions):
             if region.blocks["total"] > 0:
                 continue
-
+            
+            # Each region should be at least one block
+            # in size
             region.blocks["total"] = 1
 
+            # Try to "steal" a block from the
+            # next region
             if i + 1 < len(regions):
                 next_region = regions[i + 1]
                 next_region.blocks["start"] += 1
@@ -415,6 +441,8 @@ class MemoryMap:
                 region.blocks["start"] = region.blocks["end"]
                 region.blocks["end"] = region.blocks["start"] + 1
 
+            # Try to "steal" a block from the previous
+            # region
             elif i > 0:
                 prev_region = regions[i - 1]
                 prev_region.blocks["end"] -= 1
@@ -438,21 +466,14 @@ class MemoryMap:
             total_bytes += region.end - region.start
             total_blocks += region.blocks["total"]
 
-        total_mem_size = self.mem_size + self.heap.size
-        print(f"{self.mem_size=} {self.heap.size=}")
-
-        total_mem_blocks = self.mem_blocks + math.ceil(self.heap.size / self.blocksize)
-        print(f"{self.mem_blocks=} {math.ceil(self.heap.size / self.blocksize)=}")
-
-        try:
-            
-            assert(total_bytes == total_mem_size)
-            assert(total_blocks == total_mem_blocks)
+        try:            
+            assert(total_bytes == self.mem_size)
+            assert(total_blocks == self.mem_blocks)
         except AssertionError:
-            print(f"{total_bytes=} {total_mem_size=}")
-            print(f"{total_blocks=} {total_mem_blocks=}")
-            return
-            
+            print(f"{total_bytes=} {self.mem_size=}")
+            print(f"{total_blocks=} {self.mem_blocks=}")
+
+
     @property
     def regions(self):         
         _regions = []
@@ -468,8 +489,10 @@ class MemoryMap:
         # Add block metadata, used for visualization
         self._add_block_metadata(_regions)
 
-        # Adjust for overlapping regions
-        self._adjust_regions(_regions)
+        # Adjust for overlapping and empty regions
+        self._adjust_overlapping(_regions)
+        self._adjust_empty(_regions)
+        self._adjust_shared_block(_regions)
 
         # Perform some sanity checks
         self._check(_regions)
