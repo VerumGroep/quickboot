@@ -47,7 +47,7 @@ class Message():
 class MessageBox:    
     def __init__(self, mbox):
         self.mbox = mbox
-        
+
     @property
     def messages(self):
         messages = []
@@ -121,9 +121,14 @@ class FreeRegion(Region):
     color:str ="#14D123"
 
 @dataclass
-class MessageRegion(Region):
-    label:str = "message"
+class MessageInbox(Region):
+    label:str = "message_inbox"
     color:str ="#DB1DA2"
+
+@dataclass
+class MessageOutbox(Region):
+    label:str = "message_outbox"
+    color:str ="#C300FF"
 
 @dataclass
 class AllocatedRegion(Region):
@@ -204,26 +209,17 @@ class Heap:
                 start = chunk.start,
                 end = chunk.end,
                 properties = {
-                    "size": chunk.size,
-                    "next": chunk.next
+                    "size": f"{hex(chunk.size)}",
+                    "next": f"{hex(chunk.next)}"
                 }
             ))
 
         return regions
     
-    @property
-    def allocated(self):
-        """
-        Returns a list of allocated memory objects
-
-            - Messages
-            - Message data
-        """
-
-        # Map message messages and data
+    def _format(self, msgbox, region_class) -> list:
         regions = []
-        for message in self.msgbox.inbox + self.msgbox.outbox:            
-            regions.append(MessageRegion(
+        for message in msgbox:                                                
+            regions.append(region_class(                                          
                 start = message.header.address,
                 end = message.header.address + self.t_msg.sizeof
             ))
@@ -234,13 +230,24 @@ class Heap:
                     start = message.data,
                     end = message.data + message.header.len,
                     properties = {
-                        "message.header.address": message.header.address,
-                        "message.header.id": message.header.id,                        
-                        "data": message.payload
+                        "message.header.address": f"{hex(message.header.address)}",                                                                        
+                        "message.header.id": message.header.id
                     }
                 ))
 
         return regions
+        
+        
+    @property
+    def allocated(self):
+        """
+        Returns a list of allocated memory objects
+
+            - Messages
+            - Message data
+        """
+        return self._format(self.msgbox.inbox, MessageInbox) + \
+                self._format(self.msgbox.outbox, MessageOutbox)
     
     @property    
     def regions(self):
@@ -317,7 +324,7 @@ def get_bootloader_state(region:Region):
 
 class MemoryMap:
     # SRAM properties
-    blocksize = 0x20
+    blocksize = 0x4
     mem_start = 0x20000000
     mem_size = 0x5000
     mem_end = mem_start + mem_size
