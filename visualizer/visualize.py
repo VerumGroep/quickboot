@@ -117,7 +117,7 @@ class EmptyRegion(Region):
 
 @dataclass
 class FreeRegion(Region):
-    label:str = "free_chunk"
+    label:str = "free"
     color:str ="#14D123"
 
 @dataclass
@@ -226,10 +226,11 @@ class Heap:
 
             if message.data > 0:
                 regions.append(AllocatedRegion(
-                    label = f"Data message #{message.header.id}",
+                    label = "allocated",
                     start = message.data,
                     end = message.data + message.header.len,
                     properties = {
+                        "message.type": region_class.__name__,                        
                         "message.header.address": f"{hex(message.header.address)}",                                                                        
                         "message.header.id": message.header.id
                     }
@@ -316,7 +317,7 @@ class Heap:
 
 def get_bootloader_state(region:Region):
     region.properties = {
-        "value": int(gdb.parse_and_eval("bootloader_unlocked"))
+        "value": f"{hex(int(gdb.parse_and_eval("bootloader_unlocked")))}"
     }
 
     return region
@@ -324,7 +325,7 @@ def get_bootloader_state(region:Region):
 
 class MemoryMap:
     # SRAM properties
-    blocksize = 0x4
+    blocksize = 0x1
     mem_start = 0x20000000
     mem_size = 0x5000
     mem_end = mem_start + mem_size
@@ -390,12 +391,12 @@ class MemoryMap:
             padded_regions.append(region)
             prev_region = region
             
-        # Fill memory space up until the end of memory        
-        if prev_region.end < self.mem_end:
-            padded_regions.append(EmptyRegion(                
-                start=prev_region.end,
-                end=self.mem_end
-            ))
+        # # Fill memory space up until the end of memory        
+        # if prev_region.end < self.mem_end:
+        #     padded_regions.append(EmptyRegion(                
+        #         start=prev_region.end,
+        #         end=self.mem_end
+        #     ))
 
         return padded_regions
     
