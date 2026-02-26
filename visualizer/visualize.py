@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 
 import json
-import math
 import gdb
 
 from dataclasses import dataclass, field, asdict
-from pprint import pprint
 
 """
 This script enables visualization of the newlib nano heap allocator.
@@ -106,6 +104,7 @@ class Region:
     end:int = 0
     blocks:dict = field(default_factory=dict)
     properties:dict = field(default_factory=dict)
+    bytes:str = ""
     
     def initialize(self, callback):
         return callback(self)
@@ -317,7 +316,7 @@ class Heap:
 
 def get_bootloader_state(region:Region):
     region.properties = {
-        "value": f"{hex(int(gdb.parse_and_eval("bootloader_unlocked")))}"
+        "lock_state": f"{hex(int(gdb.parse_and_eval("bootloader_unlocked")))}"
     }
 
     return region
@@ -409,8 +408,10 @@ class MemoryMap:
             region.blocks = {
                 "start": start_block,
                 "end": end_block,
-                "total": end_block - start_block,
+                "total": end_block - start_block                
             }
+
+            region.bytes = gdb_read_range(region.start, region.end).hex()
 
 
     def _adjust_shared_block(self, regions):
@@ -537,7 +538,7 @@ if __name__ == "__main__":
                 "end": mm.heap.end,
                 "blocks": mm.heap.size // mm.blocksize
             },
-            "regions": mm.regions            
+            "regions": mm.regions
         }
     }
 
