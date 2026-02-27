@@ -111,33 +111,33 @@ class Region:
 
 @dataclass
 class EmptyRegion(Region):
-    label:str = "empty"
-    color:str ="#9C9C96"
+    label:str = "unassigned"
+    color:str ="#ffffff"
 
 @dataclass
 class FreeRegion(Region):
     label:str = "free"
-    color:str ="#14D123"
+    color:str ="#4CAF50"
 
 @dataclass
 class MessageInbox(Region):
     label:str = "message_inbox"
-    color:str ="#DB1DA2"
+    color:str ="#BA68C8"
 
 @dataclass
 class MessageOutbox(Region):
     label:str = "message_outbox"
-    color:str ="#C300FF"
+    color:str ="#9575CD"
 
 @dataclass
 class AllocatedRegion(Region):
     label:str ="allocated_chunk"
-    color:str ="#FF0000"
+    color:str ="#E53935"
 
 @dataclass
 class HeapRegion(Region):
     label:str ="heap"
-    color:str ="#FF9900"
+    color:str ="#FFB300"
 
 # // --------------------------------------------------------
 
@@ -338,12 +338,12 @@ class MemoryMap:
 
     _pre_defined_regions = [
         Region("bootloader_unlocked",
-                "#0300AD",
+                "#1E88E5",
                 int(gdb.parse_and_eval("&bootloader_unlocked")),
                 int(gdb.parse_and_eval("&bootloader_unlocked")) + 4
         ).initialize(get_bootloader_state),
         Region("handlers",
-                "#A84105",
+                "#FB8C00",
                 int(_handlers.address),
                 int(_handlers.address) + _handlers_size
     )]
