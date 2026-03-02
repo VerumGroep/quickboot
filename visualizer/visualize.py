@@ -4,21 +4,30 @@ import json
 import gdb
 
 from dataclasses import dataclass, field, asdict
+from struct import unpack
+
+MAX_HEAP_SIZE = 1024 * 16
 
 """
 This script enables visualization of the newlib nano heap allocator.
 """
 def gdb_read_range(start:int, end:int) -> bytes:
-    return gdb.selected_inferior() \
-        .read_memory(start,
-                     end - start) \
-        .tobytes()
+    try:
+        return gdb.selected_inferior() \
+            .read_memory(start,
+                        end - start) \
+            .tobytes()
+    except gdb.MemoryError:
+        return b""
 
 def gdb_read_bytes(value:gdb.Value) -> bytes:
-    return gdb.selected_inferior() \
-        .read_memory(int(value.address),
-                     value.type.sizeof) \
-        .tobytes()
+    try:
+        return gdb.selected_inferior() \
+            .read_memory(int(value.address),
+                        value.type.sizeof) \
+            .tobytes()
+    except gdb.MemoryError:
+        return b""
 
 # // --------------------------------------------------------
 
@@ -191,7 +200,10 @@ class Heap:
             chunks.append(c)
                         
             if(c.next != 0):
-                r = gdb.Value(c.next).cast(self.t_chunk.pointer()).dereference()
+                try:
+                    r = gdb.Value(c.next).cast(self.t_chunk.pointer()).dereference()
+                except gdb.MemoryError:
+                    r = None
             else:
                 r = None
 
@@ -217,23 +229,33 @@ class Heap:
     
     def _format(self, msgbox, region_class) -> list:
         regions = []
-        for message in msgbox:                                                
-            regions.append(region_class(                                          
-                start = message.header.address,
-                end = message.header.address + self.t_msg.sizeof
-            ))
+        for message in msgbox:
+            if message.data > 0:                                           
+                size_offset = message.data - 4
+                size = unpack("<i", gdb_read_range(size_offset, size_offset + 4))[0]
 
-            if message.data > 0:
+                # Apply negative offset to read actual size
+                if size < 0:
+                    size_offset += size
+                    size = unpack("<i", gdb_read_range(size_offset, size_offset + 4))[0]
+                
                 regions.append(AllocatedRegion(
-                    label = "allocated",
+                    label = "allocated",                    
                     start = message.data,
                     end = message.data + message.header.len,
                     properties = {
+                        "chunk.size": hex(size),       
+                        "chunk.size.alignment": hex(message.data - size_offset),         
                         "message.type": region_class.__name__,                        
                         "message.header.address": f"{hex(message.header.address)}",                                                                        
                         "message.header.id": message.header.id
                     }
                 ))
+
+            regions.append(region_class(                                          
+                start = message.header.address,
+                end = message.header.address + self.t_msg.sizeof
+            ))
 
         return regions
         
@@ -305,7 +327,9 @@ class Heap:
 
     @property
     def end(self):
-        return int(gdb.parse_and_eval("_sbrk(0)"))
+        end = int(gdb.parse_and_eval("_sbrk(0)"))        
+        max = self.start + MAX_HEAP_SIZE
+        return end if end <= max else max
     
     @property
     def size(self):
@@ -332,9 +356,14 @@ class MemoryMap:
     """
     This section defines the regions which need to visualized
     """
-    _handlers = gdb.parse_and_eval("handlers").dereference()
-    _handler = gdb.lookup_type("struct msg_handler")
-    _handlers_size = int(_handlers["num_handlers"]) * _handler.sizeof
+    try:
+        _handlers = gdb.parse_and_eval("handlers").dereference()
+        _handler = gdb.lookup_type("struct msg_handler")
+        _handlers_address = int(_handlers.address)
+        _handlers_size = int(_handlers["num_handlers"]) * _handler.sizeof
+    except gdb.MemoryError:                
+        _handlers_address = 0
+        _handlers_size = 0
 
     _pre_defined_regions = [
         Region("bootloader_unlocked",
@@ -344,8 +373,8 @@ class MemoryMap:
         ).initialize(get_bootloader_state),
         Region("handlers",
                 "#FB8C00",
-                int(_handlers.address),
-                int(_handlers.address) + _handlers_size
+                _handlers_address,
+                _handlers_address + _handlers_size
     )]
 
     def __init__(self, msgbox:MessageBoxes):
@@ -402,13 +431,21 @@ class MemoryMap:
 
     def _add_block_metadata(self, regions):
         for region in regions:
+
+            # Swap pointers if the end address is larger
+            # than then start address
+            if region.end < region.start:
+                start = region.start
+                region.start = region.end
+                region.end = start
+
             start_block = (region.start - self.mem_start) // self.blocksize
             end_block = (region.end - self.mem_start) // self.blocksize
-
+   
             region.blocks = {
                 "start": start_block,
                 "end": end_block,
-                "total": end_block - start_block                
+                "total": end_block - start_block
             }
 
             region.bytes = gdb_read_range(region.start, region.end).hex()
@@ -482,8 +519,9 @@ class MemoryMap:
             assert(total_bytes == self.mem_size)
             assert(total_blocks == self.mem_blocks)
         except AssertionError:
-            print(f"{total_bytes=} {self.mem_size=}")
-            print(f"{total_blocks=} {self.mem_blocks=}")
+            pass
+            # print(f"{total_bytes=} {self.mem_size=}")
+            # print(f"{total_blocks=} {self.mem_blocks=}")
 
 
     @property
@@ -494,6 +532,9 @@ class MemoryMap:
         _regions = sorted(self._pre_defined_regions +\
                           self.heap.regions,\
                            key=lambda r: r.start)
+        
+        # Check if all addresses have been dereferenced correctly
+        _regions = list(filter(lambda r: r.start > 0, _regions))
         
         # Apply padding for unallocated/undefined regions
         _regions = self._add_empty_regions(_regions)

@@ -4,7 +4,7 @@ import threading
 
 from enum import Enum
 from pathlib import Path
-from time import time_ns
+from time import time_ns, sleep
 
 from pygdbmi.gdbcontroller import GdbController
 from flask import Flask, Response
@@ -71,11 +71,16 @@ def get_snapshot():
     try:
         with _lock_state:
             halt()
-            resp = gdbmi.write(f"source {VISUALIZE_SCRIPT.as_posix()}")
+            gdbmi.write(f"source {VISUALIZE_SCRIPT.as_posix()}", read_response=False)
+            sleep(0.5)
+            resp = gdbmi.get_gdb_response()
+
+            print(f"\n\n{resp=}\n\n")
             json = {'error': 'No response from target'}
 
             for m in resp:
                 if m["stream"] == "stdout" and m["type"] == "console":
+                    print(f"\n\n{m=}\n\n")
                     json = m["payload"]
 
             run()            
