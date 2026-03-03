@@ -73,14 +73,12 @@ def get_snapshot():
             halt()
             gdbmi.write(f"source {VISUALIZE_SCRIPT.as_posix()}", read_response=False)
             sleep(0.5)
+            
             resp = gdbmi.get_gdb_response()
-
-            print(f"\n\n{resp=}\n\n")
             json = {'error': 'No response from target'}
 
             for m in resp:
                 if m["stream"] == "stdout" and m["type"] == "console":
-                    print(f"\n\n{m=}\n\n")
                     json = m["payload"]
 
             run()            
