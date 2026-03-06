@@ -138,6 +138,27 @@ Reading symbols from src/out/firmware.elf...
 # Troubleshooting
 You'll probably need to reset the device a few times while researching the firmware. Press the **black** button to reset the device. The green LED should blink twice, indicating that the firmware has been initialized successfully.
 
+# Third-Party Tools
+
+This project is released under **The Unlicense**.
+
+## SEGGER J-Link Tools
+
+The `tools/` directory contains prebuilt executables from **SEGGER's J-Link Software and Documentation Pack**. These binaries are included **only for user convenience** to simplify debugging and flashing during development.
+
+These tools:
+
+* Are not part of this project
+* Are not covered by The Unlicense
+* Remain the property of SEGGER Microcontroller GmbH
+
+All rights, licensing terms, and usage restrictions for these binaries are governed by SEGGER’s own license agreement.
+
+For the official software, updates, and license terms, please visit:
+https://www.segger.com/downloads/jlink/
+
+If you prefer, you may delete the contents of the `tools/` directory and install the J-Link software separately from SEGGER.
+
 # License
 This is free and unencumbered software released into the public domain.
 
@@ -163,25 +184,3 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org/>
-
-# Third-Party Tools
-
-This project is released under **The Unlicense**.
-
-## SEGGER J-Link Tools
-
-The `tools/` directory contains prebuilt executables from **SEGGER's J-Link Software and Documentation Pack**. These binaries are included **only for user convenience** to simplify debugging and flashing during development.
-
-These tools:
-
-* Are not part of this project
-* Are not covered by The Unlicense
-* Remain the property of SEGGER Microcontroller GmbH
-
-All rights, licensing terms, and usage restrictions for these binaries are governed by SEGGER’s own license agreement.
-
-For the official software, updates, and license terms, please visit:
-https://www.segger.com/downloads/jlink/
-
-If you prefer, you may delete the contents of the `tools/` directory and install the J-Link software separately from SEGGER.
-
