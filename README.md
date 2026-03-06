@@ -140,7 +140,7 @@ You'll probably need to reset the device a few times while researching the firmw
 
 # Third-Party Tools
 
-This project is released under **The Unlicense**.
+This project is released under the [Unlicense](https://unlicense.org).
 
 ## SEGGER J-Link Tools
 
