@@ -166,7 +166,7 @@ For more information, please refer to <https://unlicense.org/>
 
 # Third-Party Tools
 
-This project is released under **The Unlicense**. See the `LICENSE` file for details.
+This project is released under **The Unlicense**.
 
 ## SEGGER J-Link Tools
 
@@ -174,9 +174,9 @@ The `tools/` directory contains prebuilt executables from **SEGGER's J-Link Soft
 
 These tools:
 
-* Are **not part of this project**
-* Are **not covered by The Unlicense**
-* Remain the **property of SEGGER Microcontroller GmbH**
+* Are not part of this project
+* Are not covered by The Unlicense
+* Remain the property of SEGGER Microcontroller GmbH
 
 All rights, licensing terms, and usage restrictions for these binaries are governed by SEGGER’s own license agreement.
 
