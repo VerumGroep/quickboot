@@ -21,7 +21,7 @@ class DebuggerState(Enum):
 
 
 app = Flask(__name__)
-gdbmi = GdbController(['gdb-multiarch', '--interpreter=mi2', FIRMWARE_IMAGE.resolve().as_posix()])
+gdbmi = GdbController(['gdb', '--interpreter=mi2', FIRMWARE_IMAGE.resolve().as_posix()])
 
 """
 We need to keep track of the state because this script can be called asynchronous 

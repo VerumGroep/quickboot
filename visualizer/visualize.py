@@ -2,9 +2,10 @@
 
 import json
 import gdb
+import traceback
 
 from dataclasses import dataclass, field, asdict
-from struct import unpack
+from struct import unpack, pack
 
 MAX_HEAP_SIZE = 1024 * 16
 
@@ -18,7 +19,9 @@ def gdb_read_range(start:int, end:int) -> bytes:
                         end - start) \
             .tobytes()
     except gdb.MemoryError:
-        return b""
+        return pack('<I', 0)
+    except ValueError:
+        return pack('<I', 0)
 
 def gdb_read_bytes(value:gdb.Value) -> bytes:
     try:
@@ -284,7 +287,7 @@ class Heap:
         
         # If there are no mapped regions, then the entire
         # heap is mapped        
-        if not len(mapped_regions):
+        if not max(len(mapped_regions), 0):
             return [HeapRegion(                
                 start = self.start,
                 end = self.end
@@ -386,7 +389,7 @@ class MemoryMap:
                         
     def _add_empty_regions(self, regions:list):
         padded_regions = []
-        if not len(regions):
+        if not max(len(regions), 0):
             return []
 
         # Fill memory up until the first region
@@ -453,7 +456,7 @@ class MemoryMap:
 
     def _adjust_shared_block(self, regions):
         for i, region in enumerate(regions):
-            if i + 1 < len(regions):
+            if i + 1 < max(len(regions), 0):
                 next_region = regions[i + 1]
                 if region.blocks["start"] == next_region.blocks["start"]:
                     if type(next_region) in [EmptyRegion, HeapRegion]:                       
@@ -464,7 +467,7 @@ class MemoryMap:
 
     def _adjust_overlapping(self, regions):
         for i, region in enumerate(regions):
-            if i + 1 < len(regions):
+            if i + 1 < max(len(regions), 0):
                 next_region = regions[i + 1]
                 if region.end > next_region.start:                    
                     region.end = next_region.start
@@ -482,7 +485,7 @@ class MemoryMap:
 
             # Try to "steal" a block from the
             # next region
-            if i + 1 < len(regions):
+            if i + 1 < max(len(regions), 0):
                 next_region = regions[i + 1]
                 next_region.blocks["start"] += 1
                 next_region.blocks["total"] -= 1
@@ -555,32 +558,35 @@ class MemoryMap:
 # // --------------------------------------------------------
 
 if __name__ == "__main__":
-    mb = MessageBoxes()    
-    mm = MemoryMap(mb)
+    try:
+        mb = MessageBoxes()    
+        mm = MemoryMap(mb)
 
-    resp = {
-        "mailbox": {
-            "inbox": {
-                "messages": [asdict(m) for m in mb.inbox]
+        resp = {
+            "mailbox": {
+                "inbox": {
+                    "messages": [asdict(m) for m in mb.inbox]
+                },
+
+                "outbox": {
+                    "messages": [asdict(m) for m in mb.outbox]
+                }
             },
 
-            "outbox": {
-                "messages": [asdict(m) for m in mb.outbox]
+            "memory": {
+                "blocksize": mm.blocksize,
+                "start": mm.mem_start,
+                "end": mm.mem_end,  
+                "blocks": mm.mem_blocks,
+                "heap": {
+                    "start": mm.heap.start,
+                    "end": mm.heap.end,
+                    "blocks": mm.heap.size // mm.blocksize
+                },
+                "regions": mm.regions
             }
-        },
-
-        "memory": {
-            "blocksize": mm.blocksize,
-            "start": mm.mem_start,
-            "end": mm.mem_end,  
-            "blocks": mm.mem_blocks,
-            "heap": {
-                "start": mm.heap.start,
-                "end": mm.heap.end,
-                "blocks": mm.heap.size // mm.blocksize
-            },
-            "regions": mm.regions
         }
-    }
 
-    print(json.dumps(resp))
+        print(json.dumps(resp))
+    except Exception:
+        traceback.print_exc()
