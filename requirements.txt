@@ -1,4 +1,4 @@
-cstruct==6.1
+cstruct==6.2
 pyserial==3.5
 blinker==1.9.0
 click==8.3.1
