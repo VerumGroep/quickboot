@@ -16,7 +16,7 @@ def gdb_read_range(start:int, end:int) -> bytes:
     try:
         return gdb.selected_inferior() \
             .read_memory(start,
-                        max(end - start, start)) \
+                        end - start) \
             .tobytes()
     except gdb.MemoryError:
         return pack('<I', 0)
