@@ -343,7 +343,7 @@ class Heap:
 
 def get_bootloader_state(region:Region):
     region.properties = {
-        "lock_state": f"{hex(int(gdb.parse_and_eval("bootloader_unlocked")))}"
+        "lock_state": f"{hex(int(gdb.parse_and_eval('bootloader_unlocked')))}"
     }
 
     return region
