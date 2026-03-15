@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, asdict
 from struct import unpack, pack
 
 MAX_HEAP_SIZE = 1024 * 16
+WIN_STATE = 0xf2c40110
 
 """
 This script enables visualization of the newlib nano heap allocator.
@@ -341,13 +342,15 @@ class Heap:
 
 # // --------------------------------------------------------
 
-def get_bootloader_state(region:Region):
+def get_bootloader_state():
+    return int(gdb.parse_and_eval("bootloader_unlocked"))
+
+def set_bootloader_state(region: Region):
     region.properties = {
-        "lock_state": f"{hex(int(gdb.parse_and_eval('bootloader_unlocked')))}"
+        "lock_state": hex(get_bootloader_state())
     }
 
     return region
-
 
 class MemoryMap:
     # SRAM properties
@@ -373,7 +376,7 @@ class MemoryMap:
                 "#1E88E5",
                 int(gdb.parse_and_eval("&bootloader_unlocked")),
                 int(gdb.parse_and_eval("&bootloader_unlocked")) + 4
-        ).initialize(get_bootloader_state),
+        ).initialize(set_bootloader_state),
         Region("handlers",
                 "#FB8C00",
                 _handlers_address,
@@ -584,6 +587,10 @@ if __name__ == "__main__":
                     "blocks": mm.heap.size // mm.blocksize
                 },
                 "regions": mm.regions
+            },
+
+            "status": {
+                "done": get_bootloader_state() == WIN_STATE
             }
         }
 

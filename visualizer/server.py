@@ -8,7 +8,7 @@ from shutil import which
 from time import time_ns, sleep
 
 from pygdbmi.gdbcontroller import GdbController
-from flask import Flask, Response
+from flask import Flask
 from flask_cors import CORS
 
 CURRENT_DIRECTORY = Path('.')
@@ -68,7 +68,7 @@ def run(timeout: int = 2000):
     raise TimeoutError(f"Target did not continue within {timeout} ms")
 
 @app.route('/snapshot')
-def get_snapshot():
+def get_snapshot():        
     global _lock_state
     try:
         with _lock_state:
@@ -85,9 +85,9 @@ def get_snapshot():
 
             run()            
     except TimeoutError:
-        return Response({'error': 'Timeout'}, mimetype="application/json")      
+        return {'error': 'Timeout'}, 200,  {'Content-Type': 'application/json'}      
 
-    return Response(json, mimetype="application/json")
+    return json, 200, {'Content-Type': 'application/json'}
 
 if __name__ == "__main__":     
     gdbmi.write("set pagination off")
