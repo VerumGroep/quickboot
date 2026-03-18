@@ -73,15 +73,16 @@ def get_snapshot():
     try:
         with _lock_state:
             halt()
-            gdbmi.write(f"source {VISUALIZE_SCRIPT.as_posix()}", read_response=False)
-            sleep(0.5)
-            
-            resp = gdbmi.get_gdb_response()
             json = {'error': 'No response from target'}
+            gdbmi.write(f"source {VISUALIZE_SCRIPT.as_posix()}", read_response=False)            
+            done = False
 
-            for m in resp:
-                if m["stream"] == "stdout" and m["type"] == "console":
-                    json = m["payload"]
+            while not done:            
+                resp = gdbmi.get_gdb_response()
+                for m in resp:
+                    if m["stream"] == "stdout" and m["type"] == "console":
+                        json = m["payload"]
+                        done = True
 
             run()            
     except TimeoutError:
